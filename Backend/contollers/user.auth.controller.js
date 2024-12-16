@@ -1,57 +1,64 @@
-const express = require("express");
+const blackListTokenModel = require("../models/blacklistToken.js");
 const userModel = require("../models/user.model.js");
 const userService = require("../services/user.service.js");
 const { validationResult } = require("express-validator");
 
 module.exports.registerUser = async (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
 
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-    }
+  const { fullname, email, password } = req.body;
 
-    const { fullname, email, password } = req.body;
+  const hashedPassword = await userModel.hashPassword(password);
 
-    
+  const user = await userService.createUser({
+    firstname: fullname.firstname,
+    lastname: fullname.lastname,
+    email,
+    password: hashedPassword,
+  });
 
+  const token = user.generateAuthToken();
 
-    const hashedPassword = await userModel.hashPassword(password);
+  res.status(201).json({ token, user });
+};
+module.exports.loginUser = async (req, res, next) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
 
-    const user = await userService.createUser({
-        firstname: fullname.firstname,
-        lastname: fullname.lastname,
-        email,
-        password: hashedPassword
-    });
+  const { email, password } = req.body;
 
-    const token = user.generateAuthToken();
+  const user = await userModel.findOne({ email }).select("+password");
 
-    res.status(201).json({ token, user });
+  if (!user) {
+    return res.status(401).json({ message: "Invalid email or password" });
+  }
 
+  const isMatch = await user.comparePassword(password);
 
-}
-module.exports.loginUser = async (req,res,next) =>{
+  if (!isMatch) {
+    return res.status(401).json({ message: "Invalid email or password" });
+  }
 
-    const errors = validationResult(req);
-    if(!errors.isEmpty()){
-        return res.status(400).json({errors: errors.array()});
-    }
+  const token = user.generateAuthToken();
 
-    const {email,password} = req.body;
-    const user = await userModel.findOne({email}).select('+password');
-    if(!user){
-       return res.status(401).json({message:"Inavlid email or password"});
-    }
+  res.cookie("token", token);
 
-    const isMatch = await user.comparePassword(password);
-    if(!isMatch){
-        return res.status(401).json({message:'Invalid email or password'});
-    }
-    
-    const token = user.generateAuthToken();
+  res.status(200).json({ token, user });
+};
+module.exports.userProfile = async (req, res, next) => {
+  res.status(200).json(req.user);
+};
 
-    res.status(201).json({token,user});
+module.exports.logoutUser = async (req, res, next) => {
+  res.clearCookie("token");
+  const token = req.cookies.token || req.headers.authorization.split(" ")[1];
 
+  await blackListTokenModel.create({ token });
 
-
-}
+  res.status(200).json({ message: "Logged out" });
+};
